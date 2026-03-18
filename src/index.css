@@ -1,0 +1,49 @@
+﻿@import "tailwindcss";
+
+:root {
+    background-color: #02060a;
+    color-scheme: dark;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background: #02060a;
+}
+
+.stroke-text-cyan {
+    -webkit-text-stroke: 1px rgba(0, 242, 255, 0.4);
+}
+
+.tech-card-cyan {
+    clip-path: polygon(0 0, 85% 0, 100% 15%, 100% 100%, 15% 100%, 0 85%);
+    border-left: 2px solid #00f2ff33;
+}
+
+@keyframes scanline {
+    0% {
+        transform: translateY(-100%);
+    }
+
+    100% {
+        transform: translateY(100%);
+    }
+}
+
+.scanline-effect::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: linear-gradient(to bottom, transparent 50%, rgba(0, 242, 255, 0.03) 51%);
+    background-size: 100% 4px;
+    animation: scanline 10s linear infinite;
+    pointer-events: none;
+    z-index: 100;
+}
+
+input:focus {
+    outline: none;
+    border-color: #00f2ff;
+    box-shadow: 0 0 20px rgba(0, 242, 255, 0.1);
+}
