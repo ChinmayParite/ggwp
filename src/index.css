@@ -1,4 +1,4 @@
-﻿@import "tailwindcss";
+@import "tailwindcss";
 
 :root {
     background-color: #02060a;
@@ -40,6 +40,37 @@ body {
     animation: scanline 10s linear infinite;
     pointer-events: none;
     z-index: 100;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .scanline-effect::after {
+        animation: none;
+    }
+}
+
+.vignette::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(ellipse at center, transparent 40%, rgba(0, 0, 0, 0.5) 100%);
+    pointer-events: none;
+    z-index: 39;
+}
+
+.hero-stroke {
+    -webkit-text-stroke: 1.5px rgba(0, 242, 255, 0.7);
+    text-stroke: 1.5px rgba(0, 242, 255, 0.7);
+}
+
+.chromatic-hover {
+    position: relative;
+}
+.chromatic-hover:hover {
+    animation: chromatic 0.3s ease;
+}
+@keyframes chromatic {
+    0%, 100% { filter: none; }
+    50% { filter: drop-shadow(-1px 0 cyan) drop-shadow(1px 0 #ff00ff); }
 }
 
 input:focus {

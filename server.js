@@ -6,6 +6,15 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+app.get('/api/stats', (req, res) => {
+    try {
+        const data = JSON.parse(fs.readFileSync('registrations.json', 'utf8') || '[]');
+        res.json({ totalTeams: data.length });
+    } catch {
+        res.json({ totalTeams: 0 });
+    }
+});
+
 app.post('/api/register', (req, res) => {
     const registration = req.body;
     const data = JSON.parse(fs.readFileSync('registrations.json', 'utf8') || '[]');
