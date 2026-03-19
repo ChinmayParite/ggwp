@@ -5,6 +5,7 @@ import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useToast } from './Toast.jsx'
 import HUDOverlay from './HUDOverlay.jsx'
+import WindParticles from './Particles.jsx'
 
 // Inline lerp to avoid deprecated THREE.MathUtils
 const lerp = (a, b, t) => a + (b - a) * t
@@ -12,10 +13,18 @@ const lerp = (a, b, t) => a + (b - a) * t
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001'
 
 const ReduceMotionContext = createContext(false)
+const MouseContext = createContext({ x: 0, y: 0 })
+const PhaseContext = createContext({ active: null, blueprintMode: false })
 
 // --- 1. LOADING SCREEN COMPONENT ---
+const PRELOAD_LOGS = ['CHECKING_TURBINES...', 'CALIBRATING_SENSORS...', 'LOADING_FUSELAGE...', 'VERIFYING_WINGS...', 'INIT_AVIONICS...', 'BUFFERING_GEOMETRY...']
 function LoadingScreen({ onSkip, reduceMotion }) {
     const { progress } = useProgress()
+    const [logIndex, setLogIndex] = useState(0)
+    useEffect(() => {
+        const idx = Math.min(Math.floor((progress / 100) * PRELOAD_LOGS.length), PRELOAD_LOGS.length - 1)
+        setLogIndex(idx)
+    }, [progress])
     return (
         <motion.div
             key="loader-container"
@@ -43,21 +52,17 @@ function LoadingScreen({ onSkip, reduceMotion }) {
                         />
                     )}
                 </div>
-                <div className="flex justify-between text-[7px] text-gray-700 font-bold uppercase tracking-[0.2em]">
-                    <span>SECURE_CONNECTION</span>
-                    <span>BUFFERING_GEOMETRY</span>
+                <div className="h-12 overflow-hidden text-[7px] text-gray-500 font-bold uppercase tracking-[0.2em]">
+                    {PRELOAD_LOGS.slice(0, logIndex + 1).map((log, i) => (
+                        <div key={i} className={i === logIndex ? 'text-cyan-500' : ''}>{log} {i === logIndex ? 'OK' : '✓'}</div>
+                    ))}
                 </div>
             </div>
-
-            {/* SKIP BUTTON */}
-            <button
-                onClick={onSkip}
-                className="absolute bottom-10 right-10 text-[10px] text-gray-600 hover:text-cyan-400 transition-colors uppercase tracking-[0.4em] border border-white/5 px-4 py-2 hover:border-cyan-500/50"
-            >
+            <button onClick={onSkip} className="absolute bottom-10 right-10 text-[10px] text-gray-600 hover:text-cyan-400 transition-colors uppercase tracking-[0.4em] border border-white/5 px-4 py-2 hover:border-cyan-500/50">
                 [ SKIP_BOOT_SEQUENCE ]
             </button>
         </motion.div>
-    );
+    )
 }
 
 // --- 2a. STYLIZED LOADING FALLBACK (Scanning wireframe) ---
@@ -80,15 +85,23 @@ function ScanningWireframe() {
     )
 }
 
-// --- 2. VIRTUAL GRID (glowing cyan wireframe) ---
+// --- 2. VIRTUAL GRID (glowing cyan wireframe, pulses) ---
 function VirtualGrid() {
     const ref = useRef()
+    const reduceMotion = useContext(ReduceMotionContext)
     useEffect(() => {
         if (ref.current) {
             ref.current.material.opacity = 0.2
             ref.current.material.transparent = true
         }
     }, [])
+    const tRef = useRef(0)
+    useFrame((_, delta) => {
+        if (ref.current?.material && !reduceMotion) {
+            tRef.current += delta
+            ref.current.material.opacity = 0.15 + Math.sin(tRef.current * 0.5) * 0.08
+        }
+    })
     return (
         <group position={[3, -1.2, 0]} rotation={[-Math.PI / 2, 0, 0]}>
             <gridHelper ref={ref} args={[24, 24, '#00f2ff', '#00f2ff44']} />
@@ -101,6 +114,7 @@ function CADAssembly() {
     const group = useRef()
     const { mouse } = useThree()
     const reduceMotion = useContext(ReduceMotionContext)
+    const { blueprintMode } = useContext(PhaseContext)
     const { scene } = useGLTF('/aircraft.glb', true)
 
     useFrame((_, delta) => {
@@ -112,6 +126,15 @@ function CADAssembly() {
         group.current.rotation.x = lerp(group.current.rotation.x, targetX, smoothing)
     })
 
+    useEffect(() => {
+        scene.traverse((child) => {
+            if (child.isMesh && child.material) {
+                const mats = Array.isArray(child.material) ? child.material : [child.material]
+                mats.forEach((mat) => { mat.wireframe = blueprintMode })
+            }
+        })
+    }, [blueprintMode, scene])
+
     return (
         <Float speed={1.5} rotationIntensity={0} floatIntensity={0.4}>
             <group ref={group} scale={2.8} position={[3, -0.5, 0]}>
@@ -121,12 +144,27 @@ function CADAssembly() {
     )
 }
 
+// Afterburner glow - pulse behind aircraft
+function AfterburnerLight() {
+    const ref = useRef()
+    useFrame((state) => {
+        if (ref.current) {
+            const pulse = 0.8 + Math.sin(state.clock.elapsedTime * 3) * 0.4
+            ref.current.intensity = pulse * 4
+        }
+    })
+    return <pointLight ref={ref} position={[1.5, -0.5, -1.5]} color="#FF9500" intensity={4} distance={8} decay={2} />
+}
+
 function SceneContent() {
+    const reduceMotion = useContext(ReduceMotionContext)
     return (
         <>
             <Suspense fallback={<ScanningWireframe />}>
                 <VirtualGrid />
                 <CADAssembly />
+                <AfterburnerLight />
+                {!reduceMotion && <WindParticles count={60} />}
                 <Environment preset="night" />
                 <ContactShadows position={[0, -4, 0]} opacity={0.3} scale={20} blur={3} far={10} />
             </Suspense>
@@ -138,7 +176,7 @@ function SceneContent() {
 }
 
 // --- 2b. NAV BAR ---
-function NavBar({ setShowReg, regCount, reduceMotion }) {
+function NavBar({ onRegisterClick, regCount, reduceMotion }) {
     const [mobileOpen, setMobileOpen] = useState(false)
     const [bracketHover, setBracketHover] = useState(false)
     return (
@@ -157,7 +195,7 @@ function NavBar({ setShowReg, regCount, reduceMotion }) {
                         <p className="text-lg md:text-xl font-black text-white leading-none tracking-tighter italic">{regCount.toString().padStart(2, '0')}</p>
                     </div>
                     <button
-                        onClick={() => { setMobileOpen(false); setShowReg(true) }}
+                        onClick={() => { setMobileOpen(false); onRegisterClick() }}
                         className={`relative bg-cyan-500 hover:bg-white hover:text-black text-black px-6 md:px-10 py-2 md:py-2.5 font-black skew-x-[-12deg] transition-all uppercase text-xs md:text-sm overflow-hidden group register-scan-line ${!reduceMotion ? 'chromatic-hover' : ''}`}
                     >
                         {!reduceMotion && <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />}
@@ -182,7 +220,7 @@ function NavBar({ setShowReg, regCount, reduceMotion }) {
                         <p className="text-[8px] text-industrial-silver font-bold uppercase">// SQUAD_STRENGTH</p>
                         <p className="text-2xl font-black text-white">{regCount.toString().padStart(2, '0')}</p>
                     </div>
-                    <button onClick={() => { setMobileOpen(false); setShowReg(true) }} className="block w-full text-left py-2 text-cyan-400 font-bold uppercase">Register</button>
+                    <button onClick={() => { setMobileOpen(false); onRegisterClick() }} className="block w-full text-left py-2 text-cyan-400 font-bold uppercase">Register</button>
                 </motion.div>
             )}
         </>
@@ -199,7 +237,22 @@ export default function App() {
     const [formErrors, setFormErrors] = useState({ teamName: '', email: '', phone: '' })
     const [formTouched, setFormTouched] = useState({ teamName: false, email: false, phone: false })
     const [bracketHover, setBracketHover] = useState(false)
+    const [mousePos, setMousePos] = useState({ x: 0, y: 0 })
+    const [phaseState, setPhaseState] = useState({ active: null, blueprintMode: false })
+    const [shockwave, setShockwave] = useState(false)
+    const [parallaxOffset, setParallaxOffset] = useState({ x: 0, y: 0 })
     const toast = useToast()
+
+    useEffect(() => {
+        const onMouseMove = (e) => {
+            const x = (e.clientX / window.innerWidth - 0.5) * 2
+            const y = (e.clientY / window.innerHeight - 0.5) * 2
+            setMousePos({ x, y })
+            if (!reduceMotion) setParallaxOffset({ x: x * 8, y: y * 8 })
+        }
+        window.addEventListener('mousemove', onMouseMove)
+        return () => window.removeEventListener('mousemove', onMouseMove)
+    }, [reduceMotion])
 
     useEffect(() => {
         const timer = setTimeout(() => setIsLoading(false), 5000)
@@ -271,7 +324,11 @@ export default function App() {
 
     return (
         <ReduceMotionContext.Provider value={reduceMotion}>
+        <PhaseContext.Provider value={phaseState}>
+        <MouseContext.Provider value={mousePos}>
         <div className="h-screen w-full text-[#C0C0C0] font-mono overflow-hidden relative vignette cockpit-bg">
+
+            {shockwave && <div className="absolute inset-0 z-[90] shockwave-effect pointer-events-none" aria-hidden />}
 
             <AnimatePresence>
                 {isLoading && (
@@ -283,8 +340,8 @@ export default function App() {
                 )}
             </AnimatePresence>
 
-            {/* 3D BACKGROUND LAYER */}
-            <div className="absolute inset-0 z-0 opacity-60">
+            {/* 3D BACKGROUND LAYER - parallax */}
+            <div className="absolute inset-0 z-0 opacity-60 transition-transform duration-150" style={{ transform: `translate(${parallaxOffset.x}px, ${parallaxOffset.y}px) scale(1.02)` }}>
                 <Canvas shadows dpr={[1, 2]}>
                     <PerspectiveCamera makeDefault position={[0, 0, 10]} fov={45} />
                     <ambientLight intensity={1.2} />
@@ -294,10 +351,10 @@ export default function App() {
             </div>
 
             {/* HUD OVERLAY */}
-            <HUDOverlay reduceMotion={reduceMotion} />
+            <HUDOverlay reduceMotion={reduceMotion} mouseX={mousePos.x} mouseY={mousePos.y} />
 
             {/* NAVIGATION */}
-            <NavBar setShowReg={setShowReg} regCount={regCount} reduceMotion={reduceMotion} />
+            <NavBar onRegisterClick={() => { setShockwave(true); setTimeout(() => setShockwave(false), 400); setShowReg(true) }} regCount={regCount} reduceMotion={reduceMotion} />
 
             {/* HERO CONTENT */}
             <main className="absolute inset-0 flex flex-col justify-center px-6 sm:px-12 md:px-32 z-10 pointer-events-none">
@@ -310,7 +367,7 @@ export default function App() {
                         <span className="bg-cyan-500 text-black text-[10px] font-black px-3 py-1 uppercase absolute -top-4 left-6 sm:left-10 tracking-[0.2em]">National Level CAD Showdown</span>
                         <div className="relative inline-block">
                             <div className="absolute inset-0 bg-black/50 -z-10" aria-hidden="true" />
-                            <h1 className="text-[10vw] sm:text-[8vw] md:text-[6.5rem] lg:text-[8.5rem] font-black text-white tracking-tighter uppercase leading-[0.85] italic max-w-full title-glitch">AEROCAD<br /><span className="text-transparent hero-stroke">SHOWDOWN</span></h1>
+                            <h1 className="font-industrial text-[10vw] sm:text-[8vw] md:text-[6.5rem] lg:text-[8.5rem] font-black text-white tracking-tighter uppercase leading-[0.85] max-w-full title-glitch hero-shimmer">AEROCAD<br /><span className="text-transparent hero-stroke">SHOWDOWN</span></h1>
                         </div>
                     </div>
                     <div className="flex flex-col sm:flex-row gap-8 sm:gap-12 items-start sm:items-end">
@@ -327,15 +384,24 @@ export default function App() {
                                 <div className="relative border border-white/20 px-8 py-3 bg-white/5 backdrop-blur-md group-hover/bracket:bg-cyan-500/10 transition-all font-black uppercase text-[10px] tracking-[0.2em] overflow-hidden cursor-not-allowed">
                                     {bracketHover && !reduceMotion && <span className="absolute inset-0 bg-cyan-500/10 animate-pulse" />}
                                     <span className="relative z-10">View Bracket</span>
-                                    <span className="absolute -top-1 -right-1 text-[8px] text-vibrant-red font-black italic data-locked-pulse">DATA_LOCKED</span>
+                                    <span className="absolute -top-1 -right-1 text-[8px] text-mach-gold font-black italic data-locked-pulse">DATA_LOCKED</span>
                                 </div>
                                 <span className="absolute -bottom-6 left-0 text-[8px] text-industrial-silver italic">COMING SOON</span>
                             </div>
                         </div>
                         <div className="hidden lg:flex gap-3">
-                            {['Blueprint Sprint', 'Assembly Nexus', 'Grand Finale'].map((name, i) => (
-                                <div key={i} className="bg-white/5 p-3 border border-white/10 w-32 tech-card-cyan hover:bg-cyan-500/10 transition-colors">
-                                    <p className="text-[8px] text-cyan-400 font-bold mb-1 italic tracking-widest underline underline-offset-4">PHASE_0{i + 1}</p>
+                            {[
+                                { name: 'Blueprint Sprint', id: 0, blueprint: true },
+                                { name: 'Assembly Nexus', id: 1, blueprint: false },
+                                { name: 'Grand Finale', id: 2, blueprint: false },
+                            ].map(({ name, id, blueprint }) => (
+                                <div
+                                    key={id}
+                                    className="bg-white/5 p-3 border border-white/10 w-32 tech-card-cyan hover:bg-cyan-500/10 transition-all duration-300 cursor-pointer panel-rivets"
+                                    onMouseEnter={() => setPhaseState({ active: id, blueprintMode: blueprint })}
+                                    onMouseLeave={() => setPhaseState({ active: null, blueprintMode: false })}
+                                >
+                                    <p className="text-[8px] text-cyan-400 font-bold mb-1 italic tracking-widest underline underline-offset-4">PHASE_0{id + 1}</p>
                                     <p className="text-[9px] text-white font-black uppercase leading-tight italic">{name}</p>
                                 </div>
                             ))}
@@ -353,12 +419,13 @@ export default function App() {
             {/* REGISTRATION MODAL */}
             <AnimatePresence>
                 {showReg && (
-                    <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} className="absolute right-0 top-0 h-full w-full md:w-[450px] bg-black/98 border-l-2 border-cyan-500 z-50 p-12 backdrop-blur-2xl shadow-[-50px_0_100px_rgba(0,0,0,0.9)]">
-                        <div className="h-full flex flex-col justify-center">
+                    <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} className="absolute right-0 top-0 h-full w-full md:w-[450px] z-50 p-12 backdrop-blur-3xl bg-black/40 border-l-2 border-cyan-500 shadow-[-50px_0_100px_rgba(0,0,0,0.9)] panel-glass panel-rivets">
+                        <div className="h-full flex flex-col justify-center relative">
                             <h2 className="text-3xl font-black mb-12 text-white italic underline decoration-cyan-500 uppercase">Registration_Hub</h2>
                             <form onSubmit={handleSubmit} className="space-y-8">
-                                <div>
-                                    <label className="block text-[10px] text-cyan-500 mb-2 font-black uppercase tracking-[0.2em]">Team Designation</label>
+                                <div className="relative">
+                                    <span className="absolute left-0 top-1 w-1.5 h-1.5 rounded-full bg-emerald-500 led-green" />
+                                    <label className="block text-[10px] text-cyan-500 mb-2 font-black uppercase tracking-[0.2em] pl-4">Team Designation</label>
                                     <input
                                         name="teamName"
                                         required
@@ -370,8 +437,9 @@ export default function App() {
                                     {formErrors.teamName && <p className="text-[9px] text-vibrant-red mt-1 font-bold">{formErrors.teamName}</p>}
                                 </div>
                                 <div className="grid grid-cols-2 gap-6">
-                                    <div>
-                                        <label className="block text-[10px] text-industrial-silver mb-2 font-bold uppercase tracking-widest">Captain Email</label>
+                                    <div className="relative">
+                                        <span className="absolute left-0 top-1 w-1.5 h-1.5 rounded-full bg-amber-500 led-amber" />
+                                        <label className="block text-[10px] text-industrial-silver mb-2 font-bold uppercase tracking-widest pl-4">Captain Email</label>
                                         <input
                                             name="email"
                                             required
@@ -383,8 +451,9 @@ export default function App() {
                                         />
                                         {formErrors.email && <p className="text-[9px] text-vibrant-red mt-1 font-bold">{formErrors.email}</p>}
                                     </div>
-                                    <div>
-                                        <label className="block text-[10px] text-industrial-silver mb-2 font-bold uppercase tracking-widest">Contact No.</label>
+                                    <div className="relative">
+                                        <span className="absolute left-0 top-1 w-1.5 h-1.5 rounded-full bg-amber-500 led-amber" />
+                                        <label className="block text-[10px] text-industrial-silver mb-2 font-bold uppercase tracking-widest pl-4">Contact No.</label>
                                         <input
                                             name="phone"
                                             required
@@ -409,6 +478,8 @@ export default function App() {
             </AnimatePresence>
             <div className={`absolute inset-0 pointer-events-none z-40 opacity-10 ${reduceMotion ? '' : 'scanline-effect'}`} />
         </div>
+        </MouseContext.Provider>
+        </PhaseContext.Provider>
         </ReduceMotionContext.Provider>
     )
 }

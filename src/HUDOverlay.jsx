@@ -48,7 +48,9 @@ function ScrollingLogs({ reduceMotion }) {
     )
 }
 
-export default function HUDOverlay({ reduceMotion }) {
+export default function HUDOverlay({ reduceMotion, mouseX = 0, mouseY = 0 }) {
+    const pitch = mouseY * 20
+    const roll = mouseX * 15
     const [telemetry, setTelemetry] = useState({
         lat: 18.5167 + Math.random() * 0.01,
         lng: 73.8563 + Math.random() * 0.01,
@@ -86,8 +88,8 @@ export default function HUDOverlay({ reduceMotion }) {
                 <TelemetryGauge label="ALT" value={telemetry.alt} suffix="m" decimals={1} />
             </div>
             <div className="absolute top-28 right-20 md:right-24 space-y-2 text-right">
-                <TelemetryGauge label="PITCH" value={telemetry.pitch} suffix="°" decimals={1} />
-                <TelemetryGauge label="ROLL" value={telemetry.roll} suffix="°" decimals={1} />
+                <TelemetryGauge label="PITCH" value={pitch} suffix="°" decimals={1} />
+                <TelemetryGauge label="ROLL" value={roll} suffix="°" decimals={1} />
                 <TelemetryGauge label="YAW" value={telemetry.yaw} suffix="°" decimals={1} />
             </div>
 
