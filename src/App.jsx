@@ -1,8 +1,10 @@
 import React, { createContext, useContext, Suspense, useRef, useState, useEffect, useCallback } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { PerspectiveCamera, ContactShadows, useGLTF, Environment, useProgress } from '@react-three/drei'
+import { PerspectiveCamera, ContactShadows, useGLTF, Environment, useProgress, Float } from '@react-three/drei'
+import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useToast } from './Toast.jsx'
+import HUDOverlay from './HUDOverlay.jsx'
 
 // Inline lerp to avoid deprecated THREE.MathUtils
 const lerp = (a, b, t) => a + (b - a) * t
@@ -78,6 +80,22 @@ function ScanningWireframe() {
     )
 }
 
+// --- 2. VIRTUAL GRID (glowing cyan wireframe) ---
+function VirtualGrid() {
+    const ref = useRef()
+    useEffect(() => {
+        if (ref.current) {
+            ref.current.material.opacity = 0.2
+            ref.current.material.transparent = true
+        }
+    }, [])
+    return (
+        <group position={[3, -1.2, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <gridHelper ref={ref} args={[24, 24, '#00f2ff', '#00f2ff44']} />
+        </group>
+    )
+}
+
 // --- 2. 3D AIRCRAFT COMPONENT ---
 function CADAssembly() {
     const group = useRef()
@@ -85,22 +103,21 @@ function CADAssembly() {
     const reduceMotion = useContext(ReduceMotionContext)
     const { scene } = useGLTF('/aircraft.glb', true)
 
-    const elapsedRef = useRef(0)
     useFrame((_, delta) => {
         if (!group.current || reduceMotion) return
-        elapsedRef.current += delta
-        const smoothing = 1 - Math.exp(-1.5 * delta) // framerate-independent, ~0.03 feel
+        const smoothing = 1 - Math.exp(-1.5 * delta)
         const targetY = (mouse.x * Math.PI) / 4
         const targetX = (mouse.y * -Math.PI) / 5
         group.current.rotation.y = lerp(group.current.rotation.y, targetY, smoothing)
         group.current.rotation.x = lerp(group.current.rotation.x, targetX, smoothing)
-        group.current.position.y = Math.sin(elapsedRef.current / 2) * 0.12
     })
 
     return (
-        <group ref={group} scale={2.8} position={[3, -0.5, 0]}>
-            <primitive object={scene} />
-        </group>
+        <Float speed={1.5} rotationIntensity={0} floatIntensity={0.4}>
+            <group ref={group} scale={2.8} position={[3, -0.5, 0]}>
+                <primitive object={scene} />
+            </group>
+        </Float>
     )
 }
 
@@ -108,10 +125,14 @@ function SceneContent() {
     return (
         <>
             <Suspense fallback={<ScanningWireframe />}>
+                <VirtualGrid />
                 <CADAssembly />
                 <Environment preset="night" />
                 <ContactShadows position={[0, -4, 0]} opacity={0.3} scale={20} blur={3} far={10} />
             </Suspense>
+            <EffectComposer>
+                <Bloom luminanceThreshold={0.2} luminanceSmoothing={0.9} intensity={0.8} mipmapBlur />
+            </EffectComposer>
         </>
     )
 }
@@ -122,7 +143,7 @@ function NavBar({ setShowReg, regCount, reduceMotion }) {
     const [bracketHover, setBracketHover] = useState(false)
     return (
         <>
-            <nav className="absolute top-0 w-full p-4 md:p-6 flex justify-between items-center z-50 bg-black/40 backdrop-blur-md border-b border-cyan-900/30">
+            <nav className="absolute top-0 w-full p-4 md:p-6 flex justify-between items-center z-50 bg-black/30 backdrop-blur-xl border-b border-white/20 glass-noise rounded-b-lg">
                 <div className="flex items-center gap-3 md:gap-6 pointer-events-auto">
                     <img src="gamesta_aero-removebg.png" className="w-10 h-10 md:w-12 md:h-12 object-contain drop-shadow-[0_0_10px_#00f2ff]" alt="Logo" />
                     <div className="min-w-0">
@@ -137,7 +158,7 @@ function NavBar({ setShowReg, regCount, reduceMotion }) {
                     </div>
                     <button
                         onClick={() => { setMobileOpen(false); setShowReg(true) }}
-                        className={`relative bg-cyan-500 hover:bg-white hover:text-black text-black px-6 md:px-10 py-2 md:py-2.5 font-black skew-x-[-12deg] transition-all uppercase text-xs md:text-sm overflow-hidden group ${!reduceMotion ? 'chromatic-hover' : ''}`}
+                        className={`relative bg-cyan-500 hover:bg-white hover:text-black text-black px-6 md:px-10 py-2 md:py-2.5 font-black skew-x-[-12deg] transition-all uppercase text-xs md:text-sm overflow-hidden group register-scan-line ${!reduceMotion ? 'chromatic-hover' : ''}`}
                     >
                         {!reduceMotion && <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />}
                         <span className="skew-x-[12deg] inline-block tracking-tighter italic relative z-10">REGISTER</span>
@@ -155,7 +176,7 @@ function NavBar({ setShowReg, regCount, reduceMotion }) {
                 <motion.div
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="absolute top-[72px] left-0 right-0 z-40 md:hidden bg-black/95 backdrop-blur-xl border-b border-cyan-900/30 p-6 space-y-4"
+                    className="absolute top-[72px] left-0 right-0 z-40 md:hidden bg-black/60 backdrop-blur-xl border-b border-white/20 p-6 space-y-4 glass-noise"
                 >
                     <div className="border-l-2 border-cyan-500 pl-4">
                         <p className="text-[8px] text-industrial-silver font-bold uppercase">// SQUAD_STRENGTH</p>
@@ -250,7 +271,7 @@ export default function App() {
 
     return (
         <ReduceMotionContext.Provider value={reduceMotion}>
-        <div className="h-screen w-full bg-[#02060a] text-[#C0C0C0] font-mono overflow-hidden relative vignette">
+        <div className="h-screen w-full text-[#C0C0C0] font-mono overflow-hidden relative vignette cockpit-bg">
 
             <AnimatePresence>
                 {isLoading && (
@@ -272,6 +293,9 @@ export default function App() {
                 </Canvas>
             </div>
 
+            {/* HUD OVERLAY */}
+            <HUDOverlay reduceMotion={reduceMotion} />
+
             {/* NAVIGATION */}
             <NavBar setShowReg={setShowReg} regCount={regCount} reduceMotion={reduceMotion} />
 
@@ -286,7 +310,7 @@ export default function App() {
                         <span className="bg-cyan-500 text-black text-[10px] font-black px-3 py-1 uppercase absolute -top-4 left-6 sm:left-10 tracking-[0.2em]">National Level CAD Showdown</span>
                         <div className="relative inline-block">
                             <div className="absolute inset-0 bg-black/50 -z-10" aria-hidden="true" />
-                            <h1 className="text-[10vw] sm:text-[8vw] md:text-[6.5rem] lg:text-[8.5rem] font-black text-white tracking-tighter uppercase leading-[0.85] italic max-w-full">AEROCAD<br /><span className="text-transparent hero-stroke">SHOWDOWN</span></h1>
+                            <h1 className="text-[10vw] sm:text-[8vw] md:text-[6.5rem] lg:text-[8.5rem] font-black text-white tracking-tighter uppercase leading-[0.85] italic max-w-full title-glitch">AEROCAD<br /><span className="text-transparent hero-stroke">SHOWDOWN</span></h1>
                         </div>
                     </div>
                     <div className="flex flex-col sm:flex-row gap-8 sm:gap-12 items-start sm:items-end">
@@ -303,7 +327,7 @@ export default function App() {
                                 <div className="relative border border-white/20 px-8 py-3 bg-white/5 backdrop-blur-md group-hover/bracket:bg-cyan-500/10 transition-all font-black uppercase text-[10px] tracking-[0.2em] overflow-hidden cursor-not-allowed">
                                     {bracketHover && !reduceMotion && <span className="absolute inset-0 bg-cyan-500/10 animate-pulse" />}
                                     <span className="relative z-10">View Bracket</span>
-                                    <span className="absolute -top-1 -right-1 text-[8px] text-vibrant-red font-black italic opacity-80">DATA_LOCKED</span>
+                                    <span className="absolute -top-1 -right-1 text-[8px] text-vibrant-red font-black italic data-locked-pulse">DATA_LOCKED</span>
                                 </div>
                                 <span className="absolute -bottom-6 left-0 text-[8px] text-industrial-silver italic">COMING SOON</span>
                             </div>
@@ -319,8 +343,8 @@ export default function App() {
                     </div>
                 </div>
                 <div className="absolute bottom-12 left-6 sm:left-12 md:left-32 flex flex-wrap gap-4 sm:gap-12 text-[9px] font-black tracking-[0.3em] uppercase text-industrial-silver items-center">
-                    <div className="flex items-center gap-2 text-cyan-400 italic">
-                        <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse shadow-[0_0_8px_#00f2ff]" />REGISTRATION LIVE
+                    <div className="flex items-center gap-2 text-aviation-orange italic">
+                        <div className="w-2 h-2 bg-aviation-orange rounded-full animate-pulse shadow-[0_0_8px_#FF9500]" />REGISTRATION LIVE
                     </div>
                     <span>|</span><div>50 SLOTS</div><span>|</span><div className="text-white italic underline decoration-cyan-500">Venue: MITAOE, Pune</div>
                 </div>
